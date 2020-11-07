@@ -127,38 +127,45 @@ def validate_credentials(nitro_kms, password, password_hash_b64, encrypted_peppe
         'credentials_valid': password_hash_b64 == ddb_password_hash_b64
     }
 
+def gensalt(nitro_kms, rounds: int = 12, prefix: bytes = b"2b") -> bytes:
+    """
+    Generate a salt for use in bcrypt.
+
+    This function has been copied from
+    https://github.com/pyca/bcrypt/blob/master/src/bcrypt/__init__.py. The
+    only difference is replacing urandom with the NSM random function.
+    """
+    if prefix not in (b"2a", b"2b"):
+        raise ValueError("Supported prefixes are b'2a' or b'2b'")
+
+    if rounds < 4 or rounds > 31:
+        raise ValueError("Invalid rounds")
+
+    salt = nitro_kms.nsm_rand_func(16)
+    output = _bcrypt.ffi.new("char[]", 30) # pylint:disable=c-extension-no-member
+    _bcrypt.lib.encode_base64(output, salt, len(salt)) # pylint:disable=c-extension-no-member
+
+    return (
+        b"$"
+        + prefix
+        + b"$"
+        + ("%2.2u" % rounds).encode("ascii")
+        + b"$"
+        + _bcrypt.ffi.string(output) # pylint:disable=c-extension-no-member
+    )
+
 def generate_hash_and_pepper(nitro_kms, kms_key, password):
     """
     Generate a pepper and return a hashed password.
 
     The full process:
-    1) Generate random 32 byte string
+    1) Generate bcrypt salt
     2) Use that as a salt to hash the password
     3) Encrypt the byte string with KMS
     4) Return the hashed password and the encrypted salt (now a pepper)
     """
-    def gensalt(rounds: int = 12, prefix: bytes = b"2b") -> bytes:
-        if prefix not in (b"2a", b"2b"):
-            raise ValueError("Supported prefixes are b'2a' or b'2b'")
-
-        if rounds < 4 or rounds > 31:
-            raise ValueError("Invalid rounds")
-
-        salt = nitro_kms.nsm_rand_func(16)
-        output = _bcrypt.ffi.new("char[]", 30) # pylint:disable=c-extension-no-member
-        _bcrypt.lib.encode_base64(output, salt, len(salt)) # pylint:disable=c-extension-no-member
-
-        return (
-            b"$"
-            + prefix
-            + b"$"
-            + ("%2.2u" % rounds).encode("ascii")
-            + b"$"
-            + _bcrypt.ffi.string(output) # pylint:disable=c-extension-no-member
-        )
     try:
-        bcrypt.gensalt = gensalt
-        bcrypt_salt_bytes = bcrypt.gensalt()
+        bcrypt_salt_bytes = gensalt(nitro_kms)
     except Exception as exc: # pylint:disable=broad-except
         return {
             'success': False,

@@ -110,36 +110,6 @@ class NitroKms():
         )
         return base64.b64encode(libnsm_att_doc_cose_signed).decode('utf-8')
 
-    def _cms_parse_enveloped_data(self, ciphertext_for_recipient):
-        """Return symmetric key, IV, Block Size and ciphertext for serialized CMS content."""
-        content_info = cms.ContentInfo.load(ciphertext_for_recipient)
-        if content_info.tag != 16:
-            raise ValueError('CMS tag is not (16: Sequence)')
-
-        if content_info['content_type'].native != 'enveloped_data':
-            raise ValueError('CMS content_type is not enveloped_data')
-
-        enveloped_data = content_info['content']
-        recipient = enveloped_data['recipient_infos'][0].chosen
-        encrypted_content_info = enveloped_data['encrypted_content_info']
-        cipherkey = recipient['encrypted_key'].native
-
-        block_size = encrypted_content_info['content_encryption_algorithm'].encryption_block_size
-        init_vector = encrypted_content_info['content_encryption_algorithm'].encryption_iv
-        ciphertext = encrypted_content_info['encrypted_content'].native
-
-        return cipherkey, init_vector, block_size, ciphertext
-
-    def _rsa_decrypt(self, private_key, encrypted_symm_key):
-        """Decrypt the encrypted symmetric key with the RSA private key."""
-        cipher_rsa = PKCS1_OAEP.new(private_key)
-        return cipher_rsa.decrypt(encrypted_symm_key)
-
-    def _aws_cms_cipher_decrypt(self, ciphertext, key, block_size, init_vector):
-        """Decrypt the plain text data with the dycrypted key from CMS."""
-        cipher = AES.new(key, AES.MODE_CBC, iv=init_vector)
-        return unpad(cipher.decrypt(ciphertext), block_size)
-
     def _kms_call(self, amz_target, request_parameters):
         """Call AWS KMS and return the response."""
         method = 'POST'
@@ -229,6 +199,40 @@ class NitroKms():
         k_service = self._sign(k_region, service_name)
         k_signing = self._sign(k_service, 'aws4_request')
         return k_signing
+
+    @classmethod
+    def _cms_parse_enveloped_data(cls, ciphertext_for_recipient):
+        """Return symmetric key, IV, Block Size and ciphertext for serialized CMS content."""
+        content_info = cms.ContentInfo.load(ciphertext_for_recipient)
+        if content_info.tag != 16:
+            raise ValueError('CMS tag is not (16: Sequence)')
+
+        if content_info['content_type'].native != 'enveloped_data':
+            raise ValueError('CMS content_type is not enveloped_data')
+
+        enveloped_data = content_info['content']
+        recipient = enveloped_data['recipient_infos'][0].chosen
+        encrypted_content_info = enveloped_data['encrypted_content_info']
+        cipherkey = recipient['encrypted_key'].native
+
+        block_size = encrypted_content_info['content_encryption_algorithm'].encryption_block_size
+        init_vector = encrypted_content_info['content_encryption_algorithm'].encryption_iv
+        ciphertext = encrypted_content_info['encrypted_content'].native
+
+        return cipherkey, init_vector, block_size, ciphertext
+
+    @classmethod
+    def _rsa_decrypt(cls, private_key, encrypted_symm_key):
+        """Decrypt the encrypted symmetric key with the RSA private key."""
+        cipher_rsa = PKCS1_OAEP.new(private_key)
+        return cipher_rsa.decrypt(encrypted_symm_key)
+
+    @classmethod
+    def _aws_cms_cipher_decrypt(cls, ciphertext, key, block_size, init_vector):
+        """Decrypt the plain text data with the dycrypted key from CMS."""
+        cipher = AES.new(key, AES.MODE_CBC, iv=init_vector)
+        return unpad(cipher.decrypt(ciphertext), block_size)
+
 
     @classmethod
     def _sign(cls, key, msg):
