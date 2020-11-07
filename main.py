@@ -1,14 +1,13 @@
 """Enclave NitroPepper application."""
 
 import base64
-import hashlib
 import json
 import socket
+import bcrypt
 
 from kms import NitroKms
 
 ENCLAVE_PORT = 5000
-PBKDF2_ITERATIONS = 100000
 
 def main():
     """Run the nitro enclave application."""
@@ -116,11 +115,11 @@ def validate_credentials(nitro_kms, password, password_hash_b64, encrypted_peppe
             'error': f'decrypt failed: {str(exc)}'
         }
 
-    derived_key = hashlib.pbkdf2_hmac(
-        'sha512',
-        password.encode('utf-8'),
-        decrypted_pepper_bytes,
-        PBKDF2_ITERATIONS
+    derived_key = bcrypt.hashpw(password, bcrypt.gensalt())
+
+    derived_key = bcrypt.hashpw(
+        password=password.encode('utf-8'),
+        salt=decrypted_pepper_bytes
     )
 
     ddb_password_hash_b64 = base64.b64encode(derived_key).decode('utf-8')
@@ -157,11 +156,9 @@ def generate_hash_and_pepper(nitro_kms, kms_key, password):
 
     # Use pbkdf2_hmac to hash the provided password (converted to bytes) using the
     # random bytes generated above as a salt. The result is also binary.
-    derived_key = hashlib.pbkdf2_hmac(
-        'sha512',
-        password.encode('utf-8'),
-        plaintext_pepper_bytes,
-        PBKDF2_ITERATIONS
+    derived_key = bcrypt.hashpw(
+        password=password.encode('utf-8'),
+        salt=plaintext_pepper_bytes
     )
 
     # Encrypt the random byte string so we can return it to the caller.
