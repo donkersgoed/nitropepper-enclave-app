@@ -115,8 +115,6 @@ def validate_credentials(nitro_kms, password, password_hash_b64, encrypted_peppe
             'error': f'decrypt failed: {str(exc)}'
         }
 
-    derived_key = bcrypt.hashpw(password, bcrypt.gensalt())
-
     derived_key = bcrypt.hashpw(
         password=password.encode('utf-8'),
         salt=decrypted_pepper_bytes
