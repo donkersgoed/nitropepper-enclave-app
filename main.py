@@ -5,6 +5,7 @@ import json
 import socket
 import bcrypt
 
+from bcrypt import _bcrypt
 from kms import NitroKms
 
 ENCLAVE_PORT = 5000
@@ -136,34 +137,46 @@ def generate_hash_and_pepper(nitro_kms, kms_key, password):
     3) Encrypt the byte string with KMS
     4) Return the hashed password and the encrypted salt (now a pepper)
     """
-    try:
-        random = nitro_kms.kms_generate_random(
-            number_of_bytes=32
+    def gensalt(rounds: int = 12, prefix: bytes = b"2b") -> bytes:
+        if prefix not in (b"2a", b"2b"):
+            raise ValueError("Supported prefixes are b'2a' or b'2b'")
+
+        if rounds < 4 or rounds > 31:
+            raise ValueError("Invalid rounds")
+
+        salt = nitro_kms.nsm_rand_func(16)
+        output = _bcrypt.ffi.new("char[]", 30) # pylint:disable=c-extension-no-member
+        _bcrypt.lib.encode_base64(output, salt, len(salt)) # pylint:disable=c-extension-no-member
+
+        return (
+            b"$"
+            + prefix
+            + b"$"
+            + ("%2.2u" % rounds).encode("ascii")
+            + b"$"
+            + _bcrypt.ffi.string(output) # pylint:disable=c-extension-no-member
         )
+    try:
+        bcrypt.gensalt = gensalt
+        bcrypt_salt_bytes = bcrypt.gensalt()
     except Exception as exc: # pylint:disable=broad-except
         return {
             'success': False,
             'error': f'generate_random failed: {str(exc)}'
         }
 
-    # nitro_kms.kms_generate_random() returns a dictionary with a `Plaintext` field.
-    # The Plaintext field contains a base64 encoded random byte string of `number_of_bytes`
-    # length.
-    plaintext_pepper_b64 = random['Plaintext']
-    plaintext_pepper_bytes = base64.b64decode(plaintext_pepper_b64.encode('utf-8'))
-
-    # Use pbkdf2_hmac to hash the provided password (converted to bytes) using the
+    # Use bcrypt.hashpw to hash the provided password (converted to bytes) using the
     # random bytes generated above as a salt. The result is also binary.
     derived_key = bcrypt.hashpw(
         password=password.encode('utf-8'),
-        salt=plaintext_pepper_bytes
+        salt=bcrypt_salt_bytes
     )
 
     # Encrypt the random byte string so we can return it to the caller.
     try:
         encrypt_response = nitro_kms.kms_encrypt(
             kms_key_id=kms_key,
-            plaintext_bytes=plaintext_pepper_bytes
+            plaintext_bytes=bcrypt_salt_bytes
         )
     except Exception as exc: # pylint:disable=broad-except
         return {
